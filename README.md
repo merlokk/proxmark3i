@@ -1,6 +1,7 @@
 Proxmark3 RDV40 dedicated repo,  based on iceman fork
 ===============
 [![Latest release](https://img.shields.io/github/release/RfidResearchGroup/proxmark3.svg)](https://github.com/RfidResearchGroup/proxmark3/releases/latest)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fmerlokk%2Fproxmark3i.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fmerlokk%2Fproxmark3i?ref=badge_shield)
 
 ## Notice      
 This repo is based on iceman fork for proxmark3. It is dedicated to bring the most out of the new features for proxmark3 RDV40 device.
@@ -244,3 +245,7 @@ You are now ready to use your newly upgraded proxmark3 device.  Many commands us
 
 `iceman at host iuse.se`
 `July 2018, Sweden`
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fmerlokk%2Fproxmark3i.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fmerlokk%2Fproxmark3i?ref=badge_large)
