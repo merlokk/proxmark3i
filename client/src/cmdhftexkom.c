@@ -28,6 +28,8 @@
 #include "cmdhf14a.h"
 #include "cmddata.h"
 #include "graph.h"
+#include "lfdemod.h"
+#include "proxgui.h"
 
 #define TEXKOM_NOISE_THRESHOLD (10)
 
@@ -927,12 +929,144 @@ static int CmdHFTexkomSim(const char *Cmd) {
     return PM3_SUCCESS;
 }
 
+static int CmdHFTexkomSniff(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "hf texkom sniff",
+                  "Sniff a Texkom write sequence between duplicator and card",
+                  "hf texkom sniff ");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_lit0("v",  "verbose",  "Verbose work"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    bool verbose = arg_get_lit(ctx, 1);
+    CLIParserFree(ctx);
+
+    struct {
+        uint32_t samplesToSkip;
+        uint32_t triggersToSkip;
+        uint8_t skipMode;
+        uint8_t skipRatio;
+    } PACKED params = {};
+
+    params.skipMode = 0x04; // HF_SNOOP_SKIP_AVG;
+    params.skipRatio = 8;
+
+    clearCommandBuffer();
+    SendCommandNG(CMD_HF_SNIFF, (uint8_t *)&params, sizeof(params));
+
+    for (;;) {
+
+        if (kbd_enter_pressed()) {
+            SendCommandNG(CMD_BREAK_LOOP, NULL, 0);
+            PrintAndLogEx(INFO, "User aborted");
+            break;
+        }
+
+        PacketResponseNG resp;
+        if (WaitForResponseTimeout(CMD_HF_SNIFF, &resp, 1000)) {
+
+            if (resp.status == PM3_EOPABORTED) {
+                PrintAndLogEx(INFO, "Button pressed, user aborted");
+                break;
+            }
+            if (resp.status == PM3_SUCCESS) {
+
+                struct r {
+                    uint16_t len;
+                } PACKED;
+                struct r *retval = (struct r *)resp.data.asBytes;
+
+                if (verbose)
+                    PrintAndLogEx(INFO, "sniffed %u bytes", retval->len);
+
+                uint32_t start = g_pm3_capabilities.bigbuf_size - retval->len;
+                int res = getSamplesEx(start, start, false, true);
+                if (res != PM3_SUCCESS) {
+                    PrintAndLogEx(WARNING, "failed to download samples to client");
+                    return res;
+                }
+                break;
+            }
+        }
+    }
+
+    // remove DC offset
+    uint8_t bits[g_GraphTraceLen];
+    size_t size = getFromGraphBuf(bits);
+    removeSignalOffset(bits, size);
+    setGraphBuf(bits, size);
+    computeSignalProperties(bits, size);
+    RepaintGraphWindow();
+
+
+    //char bitstring[256] = {0};
+    //char cbitstring[128] = {0};
+    //char genbitstring[256] = {0};
+    uint32_t sindx = 0;
+    while (sindx < g_GraphTraceLen - 5) {
+        sindx = TexkomSearchStart(sindx, TEXKOM_NOISE_THRESHOLD);
+        if (sindx == 0 || sindx > g_GraphTraceLen - 5) {
+            if (TexkomAVGField() > 30)
+                PrintAndLogEx(WARNING, "Too noisy environment. Try to move the tag from the antenna a bit. %d", TexkomAVGField());
+            break;
+        }
+
+        uint32_t slen = TexkomSearchLength(sindx, TEXKOM_NOISE_THRESHOLD);
+        if (slen == 0)
+            continue;
+
+        uint32_t maxlvl = TexkomSearchMax(sindx, 1760);
+        if (maxlvl < TEXKOM_NOISE_THRESHOLD) {
+            sindx += 1700;
+            continue;
+        }
+
+        uint32_t noiselvl = maxlvl / 5;
+        if (noiselvl < TEXKOM_NOISE_THRESHOLD)
+            noiselvl = TEXKOM_NOISE_THRESHOLD;
+
+        PrintAndLogEx(WARNING, "--- indx: %d, len: %d, max: %d, noise: %d", sindx, slen, maxlvl, noiselvl);
+
+        uint32_t implengths[256] = {};
+        uint32_t implengthslen = 0;
+        uint32_t impulseindx = 0;
+        uint32_t impulsecnt = 0;
+        for (uint32_t i = 0; i < slen; i++) {
+            if (TexkomCorrelate(sindx + i, noiselvl)) {
+                impulsecnt++;
+
+                if (impulseindx != 0) {
+                    if (implengthslen < 256)
+                        implengths[implengthslen++] = sindx + i - impulseindx;
+                }
+                impulseindx = sindx + i;
+            }
+        }
+        PrintAndLogEx(WARNING, "--- impulses: %d, lenarray: %d, [%d,%d]", impulsecnt, implengthslen, implengths[0], implengths[1]);
+
+
+
+
+
+
+    }
+
+
+    PrintAndLogEx(INFO, "Done.");
+    return PM3_SUCCESS;
+}
+
 static int CmdHelp(const char *Cmd);
 
 static command_t CommandTable[] = {
     {"help",    CmdHelp,            AlwaysAvailable,  "This help"},
     {"reader",  CmdHFTexkomReader,  IfPm3Iso14443a,   "Act like a Texkom reader"},
     {"sim",     CmdHFTexkomSim,     IfPm3Iso14443a,   "Simulate a Texkom tag"},
+    {"sniff",   CmdHFTexkomSniff,   IfPm3Iso14443a,   "Sniff a Texkom write sequence between duplicator and card"},
     //{"write",   CmdHFTexkomWrite,   IfPm3Iso14443a,   "Write a Texkom tag"},
     {NULL,      NULL,               0, NULL}
 };
